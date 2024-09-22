@@ -1,73 +1,152 @@
 import React, { useRef, useState, useEffect } from "react";
 import styled from "styled-components";
 import socket from "../../socket";
-// import { useNavigate } from "react-router-dom";
-import Room from "../Room/Room";
+import { Room } from "../Room/Room";
 
-const Main = () => {
+const Main = ({ initialBreakRoomID }) => {
   const roomRef = useRef();
   const userRef = useRef();
   const [err, setErr] = useState(false);
   const [errMsg, setErrMsg] = useState("");
-  const [roomName, setRoomName] = useState(null);
-  // const navigate = useNavigate();
+  const [roomId, setRoomId] = useState(null);
   const [showRoom, setShowRoom] = useState(false);
-  useEffect(() => {
-    socket.on("FE-error-user-exist", ({ error }) => {
-      if (!error) {
-        const roomName = roomRef.current.value;
-        const userName = userRef.current.value;
+  const [showBreakoutUI, setShowBreakoutUI] = useState(false);
+  const [showBreakouttoMain, setShowBreakouttoMain] = useState(false);
 
-        sessionStorage.setItem("user", userName);
-        setRoomName(roomName);
-        setShowRoom(true);
+  // Function to clear localStorage
+  const clearLocalStorage = () => {
+    localStorage.clear();
+  };
+
+  // Extract fullName from URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fullName = params.get("fullName");
+
+    if (fullName && userRef.current) {
+      userRef.current.value = decodeURIComponent(fullName); // Decode in case there are encoded spaces or characters
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleError = ({ error }) => {
+      if (error) {
+        setErr(true);
+        setErrMsg("User name already exists");
       } else {
-        setErr(error);
-        setErrMsg("User name already exist");
+        const userName = userRef.current.value;
+        sessionStorage.setItem("user", userName);
       }
-    });
+    };
+
+    socket.on("FE-error-user-exist", handleError);
+
+    return () => {
+      socket.off("FE-error-user-exist", handleError);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (initialBreakRoomID) {
+      setRoomId(initialBreakRoomID);
+      setShowRoom(true);
+    }
+  }, [initialBreakRoomID]);
+
+  useEffect(() => {
+    if (localStorage.getItem("BreakoutRoomID") == null) {
+      const roomIdFromURL = window.location.pathname.split("/")[2]; // This will give "66e151e0cb17166db632fc3f"
+      if (roomIdFromURL && roomRef.current) {
+        roomRef.current.value = roomIdFromURL; // Set the room ID in the input field
+      }
+    }
   }, []);
 
   function clickJoin() {
     const roomName = roomRef.current.value;
     const userName = userRef.current.value;
-    console.log("roomName: ", roomName);
-
+    const roomIdFromURL = window.location.pathname.split("/")[2]; // This will give "66e151e0cb17166db632fc3f"
+    console.log(roomIdFromURL);
     if (!roomName || !userName) {
       setErr(true);
-      setErrMsg("Enter Room Name or User Name");
+      setErrMsg("Enter Room Name and User Name");
     } else {
       sessionStorage.setItem("user", userName);
-
-      socket.emit("BE-check-user", { roomId: roomName, userName });
-      console.log("BE-check-user: ", { roomId: roomName, userName });
-      setRoomName(roomName);
+      {
+        !localStorage.getItem("mainRoomId") &&
+          localStorage.setItem("mainRoomId", roomIdFromURL);
+      }
+      setRoomId(roomIdFromURL);
       setShowRoom(true);
+      socket.emit("BE-check-user", { roomId: roomIdFromURL, userName });
     }
   }
 
+  useEffect(() => {
+    if (roomRef.current) {
+      const params = new URLSearchParams(window.location.search);
+      const fullName = params.get("fullName");
+      const breakoutRoomID = localStorage.getItem("BreakoutRoomID");
+      if (breakoutRoomID) {
+        roomRef.current.value = breakoutRoomID;
+        userRef.current.value = decodeURIComponent(fullName); // Decode in case there are encoded spaces or characters
+
+        setRoomId(breakoutRoomID);
+        setShowBreakoutUI(true);
+      }
+    }
+    if (roomRef.current && localStorage.getItem("BreakoutRoomID") == null) {
+      let mainRoomId = localStorage.getItem("mainRoomId");
+      if (mainRoomId) {
+        roomRef.current.value = mainRoomId;
+        setRoomId(mainRoomId);
+        setShowBreakouttoMain(true);
+      }
+    }
+  });
+
   return (
-    <>
-      {!showRoom ? (
+    <MainContainer>
+      {!showBreakoutUI ? (
         <>
-          {" "}
-          <MainContainer>
-            <Row>
-              <Label htmlFor="roomName">Room Name</Label>
-              <Input type="text" id="roomName" ref={roomRef} />
-            </Row>
-            <Row>
-              <Label htmlFor="userName">User Name</Label>
-              <Input type="text" id="userName" ref={userRef} />
-            </Row>
-            <JoinButton onClick={clickJoin}> Join </JoinButton>
-            {err ? <Error>{errMsg}</Error> : null}
-          </MainContainer>
+          {!showRoom ? (
+            <>
+              <HiddenInputRow>
+                <Input ref={roomRef} type="text" />
+              </HiddenInputRow>
+              <HiddenInputRow>
+                <Input ref={userRef} type="text" />
+              </HiddenInputRow>
+              <JoinButton onClick={clickJoin}>Join</JoinButton>
+              {err ? <Error>{errMsg}</Error> : null}
+            </>
+          ) : (
+            <Room roomId={roomId} />
+          )}
         </>
       ) : (
-        <Room roomId={roomName} />
+        <div>
+          {!showRoom ? (
+            <>
+              <HiddenInputRow>
+                <Input ref={roomRef} type="text" readOnly />
+              </HiddenInputRow>
+              <HiddenInputRow>
+                <Input ref={userRef} type="text" />
+              </HiddenInputRow>
+              <JoinButton onClick={clickJoin}>
+                {showBreakouttoMain && localStorage.getItem("BreakoutRoomID") == null
+                  ? "Go to Main Room"
+                  : "Join BreakOut"}
+              </JoinButton>
+              {err ? <Error>{errMsg}</Error> : null}
+            </>
+          ) : (
+            <Room roomId={roomId} />
+          )}
+        </div>
       )}
-    </>
+    </MainContainer>
   );
 };
 
@@ -76,15 +155,9 @@ const MainContainer = styled.div`
   flex-direction: column;
 `;
 
-const Row = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  margin-top: 15px;
-  line-height: 35px;
+const HiddenInputRow = styled.div`
+  display: none; /* Hide the row containing inputs */
 `;
-
-const Label = styled.label``;
 
 const Input = styled.input`
   width: 150px;
@@ -109,12 +182,12 @@ const JoinButton = styled.button`
   border: none;
   border-radius: 15px;
   color: #d8e9ef;
-  background-color: #4ea1d3;
+  background-color: #ff6600;
   font-size: 25px;
   font-weight: 500;
 
-  :hover {
-    background-color: #7bb1d1;
+  &:hover {
+    background-color: #ff6600;
     cursor: pointer;
   }
 `;
