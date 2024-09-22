@@ -1,48 +1,69 @@
 import React, { useRef, useState, useEffect } from "react";
 import styled from "styled-components";
 import socket from "../../socket";
+// import { useNavigate } from "react-router-dom";
 import Room from "../Room/Room";
 
 const Main = () => {
+  const roomRef = useRef();
+  const userRef = useRef();
   const [err, setErr] = useState(false);
   const [errMsg, setErrMsg] = useState("");
   const [roomName, setRoomName] = useState(null);
+  // const navigate = useNavigate();
   const [showRoom, setShowRoom] = useState(false);
-  const [fullName, setFullName] = useState("");
-
   useEffect(() => {
-    // Parse fullName from URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const fullNameFromUrl = urlParams.get("fullName");
-    setFullName(fullNameFromUrl || "");
-
     socket.on("FE-error-user-exist", ({ error }) => {
       if (!error) {
-        setRoomName("Testing Room");
+        const roomName = roomRef.current.value;
+        const userName = userRef.current.value;
+
+        sessionStorage.setItem("user", userName);
+        setRoomName(roomName);
         setShowRoom(true);
       } else {
         setErr(error);
-        setErrMsg("User name already exists");
+        setErrMsg("User name already exist");
       }
     });
   }, []);
 
   function clickJoin() {
-    const userName = fullName;
+    const roomName = roomRef.current.value;
+    const userName = userRef.current.value;
     console.log("roomName: ", roomName);
-    socket.emit("BE-check-user", { roomId: roomName, userName });
-    console.log("BE-check-user: ", { roomId: roomName, userName });
-    setRoomName("Testing Room");
-    setShowRoom(true);
+
+    if (!roomName || !userName) {
+      setErr(true);
+      setErrMsg("Enter Room Name or User Name");
+    } else {
+      sessionStorage.setItem("user", userName);
+
+      socket.emit("BE-check-user", { roomId: roomName, userName });
+      console.log("BE-check-user: ", { roomId: roomName, userName });
+      setRoomName(roomName);
+      setShowRoom(true);
+    }
   }
 
   return (
     <>
       {!showRoom ? (
-        <MainContainer>
-          <JoinButton onClick={clickJoin}>Join</JoinButton>
-          {err ? <Error>{errMsg}</Error> : null}
-        </MainContainer>
+        <>
+          {" "}
+          <MainContainer>
+            <Row>
+              <Label htmlFor="roomName">Room Name</Label>
+              <Input type="text" id="roomName" ref={roomRef} />
+            </Row>
+            <Row>
+              <Label htmlFor="userName">User Name</Label>
+              <Input type="text" id="userName" ref={userRef} />
+            </Row>
+            <JoinButton onClick={clickJoin}> Join </JoinButton>
+            {err ? <Error>{errMsg}</Error> : null}
+          </MainContainer>
+        </>
       ) : (
         <Room roomId={roomName} />
       )}
@@ -53,6 +74,26 @@ const Main = () => {
 const MainContainer = styled.div`
   display: flex;
   flex-direction: column;
+`;
+
+const Row = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 15px;
+  line-height: 35px;
+`;
+
+const Label = styled.label``;
+
+const Input = styled.input`
+  width: 150px;
+  height: 35px;
+  margin-left: 15px;
+  padding-left: 10px;
+  outline: none;
+  border: none;
+  border-radius: 5px;
 `;
 
 const Error = styled.div`
