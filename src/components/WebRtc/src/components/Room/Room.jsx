@@ -6,7 +6,11 @@ import VideoCard from "../Video/VideoCard";
 import BottomBar from "../BottomBar/BottomBar";
 // import Chat from "../Chat/Chat";
 
-export const Room = ({ roomId }) => {
+// params
+// import { useParams } from "react-router-dom";
+
+const Room = ({ roomId }) => {
+  console.log("roomId: ", roomId);
   const currentUser = sessionStorage.getItem("user");
   const [peers, setPeers] = useState([]);
   const [userVideoAudio, setUserVideoAudio] = useState({
@@ -15,16 +19,16 @@ export const Room = ({ roomId }) => {
   const [videoDevices, setVideoDevices] = useState([]);
   const [displayChat, setDisplayChat] = useState(false);
   const [screenShare, setScreenShare] = useState(false);
-  const [screenShareStream, setScreenShareStream] = useState(null);
   const [showVideoDevices, setShowVideoDevices] = useState(false);
-  const [screenShareUser, setScreenShareUser] = useState(null);
-
   const peersRef = useRef([]);
   const userVideoRef = useRef();
-  const screenShareRef = useRef();
+  const screenTrackRef = useRef();
   const userStream = useRef();
+  // const { roomId } = useParams(); // this will work with react-router-dom v6
+  // console.log("roomId: ", roomId);
 
   useEffect(() => {
+    console.log("effect roomId: ", roomId);
     // Get Video Devices
     navigator.mediaDevices.enumerateDevices().then((devices) => {
       const filtered = devices.filter((device) => device.kind === "videoinput");
@@ -106,14 +110,13 @@ export const Room = ({ roomId }) => {
 
         socket.on("FE-user-leave", ({ userId, userName }) => {
           const peerIdx = findPeer(userId);
-          if (peerIdx) {
+          if (peerIdx !== -1) {
             peerIdx.peer.destroy();
-            setPeers((prevPeers) =>
-              prevPeers.filter((peer) => peer.peerID !== userId)
-            );
+            setPeers((users) => users.filter((user) => user.peerID !== userId));
             peersRef.current = peersRef.current.filter(
               ({ peerID }) => peerID !== userId
             );
+
             setUserVideoAudio((prevList) => {
               const newList = { ...prevList };
               delete newList[userName];
@@ -127,8 +130,8 @@ export const Room = ({ roomId }) => {
       const peerIdx = findPeer(userId);
 
       setUserVideoAudio((preList) => {
-        let video = preList[peerIdx?.userName].video;
-        let audio = preList[peerIdx?.userName].audio;
+        let video = preList[peerIdx.userName].video;
+        let audio = preList[peerIdx.userName].audio;
 
         if (switchTarget === "video") video = !video;
         else audio = !audio;
@@ -141,15 +144,11 @@ export const Room = ({ roomId }) => {
     });
 
     return () => {
+      console.log("disconnect");
       socket.disconnect();
     };
-  }, [roomId, currentUser]);
-
-  useEffect(() => {
-    if (screenShareStream && screenShareRef.current) {
-      screenShareRef.current.srcObject = screenShareStream;
-    }
-  }, [screenShareStream]);
+    // eslint-disable-next-line
+  }, []);
 
   function createPeer(userId, caller, stream) {
     const peer = new Peer({
@@ -165,7 +164,6 @@ export const Room = ({ roomId }) => {
         signal,
       });
     });
-
     peer.on("disconnect", () => {
       peer.destroy();
     });
@@ -198,11 +196,16 @@ export const Room = ({ roomId }) => {
   }
 
   function createUserVideo(peer, index, arr) {
+    console.log("createUserVideo", peer, index, arr);
     return (
-      <VideoBox key={peer.peerID}>
+      <VideoBox
+        className={`width-peer${peers.length > 8 ? "" : peers.length}`}
+        onClick={expandScreen}
+        key={peer.peerID}
+      >
         {writeUserName(peer.userName)}
-        <VideoCard peer={peer} number={arr.length} />
-        <UserLabel>{peer.userName}</UserLabel>
+        <FaIcon className="fas fa-expand" />
+        <VideoCard key={index} peer={peer} number={arr.length} />
       </VideoBox>
     );
   }
@@ -215,25 +218,18 @@ export const Room = ({ roomId }) => {
     }
   }
 
+  // Open Chat
   const clickChat = (e) => {
     e.stopPropagation();
     setDisplayChat(!displayChat);
   };
 
+  // BackButton
   const goToBack = (e) => {
     e.preventDefault();
     socket.emit("BE-leave-room", { roomId, leaver: currentUser });
     sessionStorage.removeItem("user");
-    localStorage.removeItem("BreakoutRoomID");
-    localStorage.removeItem("mainRoomId");
     window.location.href = "/";
-  };
-
-  const goToBackBreack = (e) => {
-    e.preventDefault();
-    socket.emit("BE-leave-room", { roomId, leaver: currentUser });
-    localStorage.removeItem("BreakoutRoomID");
-    window.location.reload();
   };
 
   const toggleCameraAudio = (e) => {
@@ -270,14 +266,9 @@ export const Room = ({ roomId }) => {
   };
 
   const clickScreenSharing = () => {
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      alert("Your browser doesn't support screen sharing");
-      return;
-    }
-
     if (!screenShare) {
       navigator.mediaDevices
-        .getDisplayMedia({ video: true })
+        .getDisplayMedia({ cursor: true })
         .then((stream) => {
           const screenTrack = stream.getTracks()[0];
 
@@ -308,47 +299,12 @@ export const Room = ({ roomId }) => {
           };
 
           userVideoRef.current.srcObject = stream;
-          screenTrack.onended = () => {
-            userVideoRef.current.srcObject = userStream.current;
-            setScreenShare(false);
-          };
-
+          screenTrackRef.current = screenTrack;
           setScreenShare(true);
-          setScreenShareStream(stream);
-          setScreenShareUser(currentUser);
-          socket.emit("BE-screen-share-started", {
-            roomId,
-            userName: currentUser,
-          });
-        })
-        .catch((error) => {
-          console.error("Error accessing screen share:", error);
-          alert(`Failed to start screen sharing: ${error.message}`);
         });
     } else {
-      stopScreenShare();
+      screenTrackRef.current.onended();
     }
-  };
-
-  const stopScreenShare = () => {
-    if (!screenShareStream) return;
-
-    const tracks = screenShareStream.getTracks();
-    tracks.forEach((track) => track.stop());
-
-    peersRef.current.forEach(({ peer }) => {
-      peer.replaceTrack(
-        peer.streams[0].getTracks().find((track) => track.kind === "video"),
-        userStream.current.getTracks().find((track) => track.kind === "video"),
-        userStream.current
-      );
-    });
-
-    userVideoRef.current.srcObject = userStream.current;
-    setScreenShare(false);
-    setScreenShareStream(null);
-    setScreenShareUser(null);
-    socket.emit("BE-screen-share-stopped", { roomId, userName: currentUser });
   };
 
   const expandScreen = (e) => {
@@ -357,12 +313,21 @@ export const Room = ({ roomId }) => {
     if (elem.requestFullscreen) {
       elem.requestFullscreen();
     } else if (elem.mozRequestFullScreen) {
+      /* Firefox */
       elem.mozRequestFullScreen();
     } else if (elem.webkitRequestFullscreen) {
+      /* Chrome, Safari & Opera */
       elem.webkitRequestFullscreen();
     } else if (elem.msRequestFullscreen) {
+      /* IE/Edge */
       elem.msRequestFullscreen();
     }
+  };
+
+  const clickBackground = () => {
+    if (!showVideoDevices) return;
+
+    setShowVideoDevices(false);
   };
 
   const clickCameraDevice = (event) => {
@@ -403,48 +368,30 @@ export const Room = ({ roomId }) => {
 
   return (
     <RoomContainer>
-      <MainContent>
+      <MainContainer>
         <VideoArea>
-          <ParticipantsContainer isScreenSharing={!!screenShareUser}>
-            <ParticipantGrid>
-              <VideoBox isCurrentUser>
-                {userVideoAudio["localUser"].video ? null : (
-                  <UserName>{currentUser}</UserName>
-                )}
-                <MyVideo ref={userVideoRef} muted autoPlay playsInline />
-                <UserLabel>{currentUser} (You)</UserLabel>
-              </VideoBox>
-              {peers.map((peer, index, arr) =>
-                createUserVideo(peer, index, arr)
+          <MyVideoContainer>
+            <VideoBox>
+              {userVideoAudio["localUser"].video ? null : (
+                <UserName>{currentUser}</UserName>
               )}
-            </ParticipantGrid>
-          </ParticipantsContainer>
-          <ScreenShareContainer isScreenSharing={!!screenShareUser}>
-            {screenShareUser && (
-              <ScreenShareBox>
-                <PresenterLabel>{screenShareUser} is presenting</PresenterLabel>
-                {screenShareUser === currentUser ? (
-                  <ScreenShareVideo ref={screenShareRef} autoPlay playsInline />
-                ) : (
-                  <VideoCard
-                    peer={
-                      peersRef.current.find(
-                        (p) => p.userName === screenShareUser
-                      )?.peer
-                    }
-                    isScreenSharing={true}
-                  />
-                )}
-              </ScreenShareBox>
-            )}
-          </ScreenShareContainer>
+              <MyVideo ref={userVideoRef} muted autoPlay playsInline />
+            </VideoBox>
+          </MyVideoContainer>
+          <OtherVideosContainer>
+            {peers.map((peer, index, arr) => (
+              <VideoBox key={peer.peerID}>
+                {writeUserName(peer.userName)}
+                <VideoCard peer={peer} number={arr.length} />
+              </VideoBox>
+            ))}
+          </OtherVideosContainer>
         </VideoArea>
         <BottomBar
           clickScreenSharing={clickScreenSharing}
           clickChat={clickChat}
           clickCameraDevice={clickCameraDevice}
           goToBack={goToBack}
-          goToBackBreack={goToBackBreack}
           toggleCameraAudio={toggleCameraAudio}
           userVideoAudio={userVideoAudio["localUser"]}
           screenShare={screenShare}
@@ -452,10 +399,7 @@ export const Room = ({ roomId }) => {
           showVideoDevices={showVideoDevices}
           setShowVideoDevices={setShowVideoDevices}
         />
-      </MainContent>
-      <ChatContainer display={displayChat}>
-        {/* <Chat display={displayChat} roomId={roomId} /> */}
-      </ChatContainer>
+      </MainContainer>
     </RoomContainer>
   );
 };
@@ -463,56 +407,75 @@ export const Room = ({ roomId }) => {
 const RoomContainer = styled.div`
   display: flex;
   width: 100%;
-  height: 90vh;
-  background-color: #1a1a1a;
+  height: 100vh;
+  flex-direction: column;
+  background-color: #1c1e20;
 `;
 
-const MainContent = styled.div`
-  flex: 1;
+const MainContainer = styled.div`
   display: flex;
   flex-direction: column;
+  height: 100%;
 `;
 
 const VideoArea = styled.div`
-  flex: 1;
   display: flex;
-  overflow: hidden;
-`;
-const ScreenShareContainer = styled.div`
-  flex: ${(props) => (props.isScreenSharing ? "1 0 80%" : "0 0 0%")};
-  height: 100%;
-  background-color: #1a1a1a;
-  transition: all 0.3s ease;
-  overflow: hidden;
-`;
-const ParticipantsContainer = styled.div`
-  flex: ${(props) => (props.isScreenSharing ? "0 0 20%" : "1 0 100%")};
-  height: 100%;
-  background-color: #2c2c2c;
-  transition: all 0.3s ease;
-  overflow: auto;
+  justify-content: center;
+  align-items: center;
+  height: calc(100vh - 70px); // Adjust based on your BottomBar height
+  width: 100%;
+  position: relative;
 `;
 
-const ParticipantGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 10px;
-  padding: 10px;
+const MyVideoContainer = styled.div`
+  width: 280px;
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 2;
+`;
+
+const OtherVideosContainer = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+  height: 100%;
+  width: 100%;
+  padding: 20px;
+  overflow-y: auto;
+
+  /* Custom scrollbar styles */
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a4a #262626;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #262626;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: #4a4a4a;
+    border-radius: 4px;
+  }
 `;
 
 const VideoBox = styled.div`
   position: relative;
-  aspect-ratio: 16 / 9;
-  background-color: #3c3c3c;
-  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 280px;
+  height: 210px;
+  background-color: #2c2f33;
+  border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-
-  ${(props) =>
-    props.isCurrentUser &&
-    `
-    border: 2px solid #4a90e2;
-  `}
 `;
 
 const MyVideo = styled.video`
@@ -523,54 +486,13 @@ const MyVideo = styled.video`
 
 const UserName = styled.div`
   position: absolute;
-  top: 10px;
-  left: 10px;
-  color: white;
-  padding: 5px 10px;
-  background-color: rgba(0, 0, 0, 0.5);
-  border-radius: 4px;
-  font-size: 14px;
-`;
-
-const UserLabel = styled.div`
-  position: absolute;
   bottom: 10px;
   left: 10px;
   color: white;
-  padding: 5px 10px;
   background-color: rgba(0, 0, 0, 0.5);
+  padding: 2px 8px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 14px;
+  z-index: 1;
 `;
-
-const PresenterLabel = styled.div`
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  color: white;
-  padding: 8px 16px;
-  background-color: rgba(74, 144, 226, 0.8);
-  border-radius: 20px;
-  font-size: 16px;
-  font-weight: bold;
-  z-index: 10;
-`;
-
-const ChatContainer = styled.div`
-  width: ${(props) => (props.display ? "300px" : "0px")};
-  transition: width 0.3s ease;
-  overflow: hidden;
-`;
-const ScreenShareBox = styled.div`
-  position: relative;
-  width: 100%;
-  height: 60%;
-`;
-
-const ScreenShareVideo = styled.video`
-  width: 100%;
-  height: 100%;
-  // object-fit: contain;
-  background-color: #000;
-  overflow: scroll;
-`;
+export default Room;
